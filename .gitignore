@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Mac file
+.DS_Store
+
+# Ignore heavy model checkpoints and pickled weights
+
+*.png
+*.pth
+*.csv
+*.parquet
+*.json
+*.pkl
+*.zip
+
+data/
+outputs/
