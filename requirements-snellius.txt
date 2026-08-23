@@ -73,7 +73,7 @@ networkx==3.6.1
     # via torch
 numpy==2.4.5
     # via
-    #   bliat-clm-optimiser
+    #   block-level-learned-optimization
     #   pandas
     #   pydeck
     #   scikit-learn
@@ -128,18 +128,18 @@ packaging==26.2
     #   streamlit
 pandas==3.0.3
     # via
-    #   bliat-clm-optimiser
+    #   block-level-learned-optimization
     #   streamlit
 pillow==12.2.0
     # via
     #   streamlit
     #   torchvision
 plotly==6.7.0
-    # via bliat-clm-optimiser
+    # via block-level-learned-optimization
 protobuf==7.34.1
     # via streamlit
 psutil==7.2.2
-    # via bliat-clm-optimiser
+    # via block-level-learned-optimization
 pyarrow==24.0.0
     # via streamlit
 pydeck==0.9.2
@@ -159,7 +159,7 @@ rpds-py==0.30.0
     #   jsonschema
     #   referencing
 scikit-learn==1.8.0
-    # via bliat-clm-optimiser
+    # via block-level-learned-optimization
 scipy==1.17.1
     # via scikit-learn
 setuptools==81.0.0
@@ -171,7 +171,7 @@ smmap==5.0.3
 starlette==1.0.0
     # via streamlit
 streamlit==1.57.0
-    # via bliat-clm-optimiser
+    # via block-level-learned-optimization
 sympy==1.14.0
     # via torch
 tenacity==9.1.4
@@ -182,12 +182,12 @@ toml==0.10.2
     # via streamlit
 torch==2.12.0
     # via
-    #   bliat-clm-optimiser
+    #   block-level-learned-optimization
     #   torchvision
 torchvision==0.27.0
-    # via bliat-clm-optimiser
+    # via block-level-learned-optimization
 tqdm==4.67.3
-    # via bliat-clm-optimiser
+    # via block-level-learned-optimization
 triton==3.7.0 ; sys_platform == 'linux'
     # via torch
 typing-extensions==4.15.0

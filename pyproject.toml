@@ -1,7 +1,7 @@
 [project]
-name = "bliat-clm-optimiser"
+name = "block-level-learned-optimization"
 version = "0.1.0"
-description = "Add your description here"
+description = "Research code for block-level learned optimization in continual learning"
 readme = "README.md"
 authors = [
     { name = "Aniket-Mishra", email = "anmishraofficial@gmail.com" }

@@ -1,5 +1,5 @@
-import bliat_clm_optimiser
+import block_level_learned_optimization
 
 
 def test_import():
-    assert bliat_clm_optimiser is not None
+    assert block_level_learned_optimization is not None

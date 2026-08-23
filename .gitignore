@@ -225,6 +225,7 @@ __marimo__/
 
 *.png
 *.pth
+!pretrained_task_encoders/task_encoder_svhn.pth
 *.csv
 *.parquet
 *.json
