@@ -1,4 +1,4 @@
-# Block-Level Learned Optimization for Continual Learning
+# Block-Level Learned Optimisation for Continual Learning
 
 Code for the proposed method, experiment runner, and continual-learning baselines used in the thesis.
 
