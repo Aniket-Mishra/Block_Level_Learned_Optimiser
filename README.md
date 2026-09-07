@@ -2,6 +2,9 @@
 
 Code for the proposed method, experiment runner, and continual-learning baselines used in the thesis.
 
+##### This is the final code for my Master's Thesis
+##### Grade: 9/10
+
 ## Layout
 
 - `experiments/run_plans.py`: main experiment entry point and editable plans.
