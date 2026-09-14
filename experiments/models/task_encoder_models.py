@@ -44,7 +44,7 @@ class TaskEncoderMNIST(torch.nn.Module):
                 f"Loading pretrained task encoder from: {pretrained_model_path}"
             )
             pretrained_task_encoder.load_state_dict(
-                torch.load(pretrained_model_path)
+                torch.load(pretrained_model_path, map_location="cpu")
             )
         else:
             print(

@@ -130,6 +130,23 @@ imagenet_baseline_backfill = ("lamaml",)
 
 
 PLANS = {
+    "splitmnist_smoke": {
+        "seeds": [0],
+        "proposed": [
+            ProposedRun(
+                "splitmnist",
+                ALL_BUT_HEAD,
+                "all_but_head",
+                flag_overrides={
+                    "steps": 10,
+                    "warmup_steps": 1,
+                    "test_steps": 1,
+                    "log_interval": 1,
+                },
+            ),
+        ],
+        "baselines": [],
+    },
     "mnist": {
         "proposed": [
             ProposedRun("splitmnist", ALL_BUT_HEAD, "all_but_head"),
