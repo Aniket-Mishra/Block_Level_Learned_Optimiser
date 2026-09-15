@@ -130,6 +130,23 @@ imagenet_baseline_backfill = ("lamaml",)
 
 
 PLANS = {
+    "splitmnist_smoke": {
+        "seeds": [0],
+        "proposed": [
+            ProposedRun(
+                "splitmnist",
+                ALL_BUT_HEAD,
+                "all_but_head",
+                flag_overrides={
+                    "steps": 10,
+                    "warmup_steps": 1,
+                    "test_steps": 1,
+                    "log_interval": 1,
+                },
+            ),
+        ],
+        "baselines": [],
+    },
     "mnist": {
         "proposed": [
             ProposedRun("splitmnist", ALL_BUT_HEAD, "all_but_head"),
@@ -570,7 +587,9 @@ def build_proposed_jobs(plan, output_dir):
     for run in plan["proposed"]:
         if run.variants is None:
             base_jobs = proposed_primary_jobs(
-                [run.dataset], [run.training_layers]
+                [run.dataset],
+                [run.training_layers],
+                flag_overrides=run.flag_overrides,
             )
         else:
             unknown = [name for name in run.variants if name not in VARIANTS]
