@@ -4,7 +4,6 @@ import copy
 import csv
 import time
 
-import dataset
 import numpy as np
 import torch
 import torch.nn as nn
@@ -139,11 +138,14 @@ def _controller_row(
 
 
 class PROPOSED:
-    def __init__(self, model, transformer, criterion, config_params):
+    def __init__(
+        self, model, transformer, criterion, config_params, batch_generator_class
+    ):
         self.model = model
         self.transformer_model = transformer
         self.criterion = criterion
         self.config_params = config_params
+        self._batch_generator_class = batch_generator_class
 
         # Hot-path caches; treated as read-only after construction.
         self._mse_loss = nn.MSELoss()
@@ -695,7 +697,7 @@ class PROPOSED:
             else self.config_params["steps"]
         )
 
-        batch_generator = dataset.BatchGenerator(data, self.config_params)
+        batch_generator = self._batch_generator_class(data, self.config_params)
 
         timer_accum = {
             "c": 0.0,
@@ -1012,7 +1014,7 @@ class PROPOSED:
         return test_accuracy, test_loss
 
     def evaluate(self, data, task_id, nb_test_batch=5, device=None):
-        test_generator = dataset.BatchGenerator(data, self.config_params)
+        test_generator = self._batch_generator_class(data, self.config_params)
         avg_accuracy = []
         for _ in range(nb_test_batch):
             batch = test_generator.get_batch(device)

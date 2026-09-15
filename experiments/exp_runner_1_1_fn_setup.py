@@ -225,7 +225,13 @@ def _init_method(config, n_tasks, device, base_name=None):
         task_encoder=task_encoder,
     ).to(device)
 
-    method = PROPOSED(model, transformer_model, criterion, config)
+    method = PROPOSED(
+        model,
+        transformer_model,
+        criterion,
+        config,
+        batch_generator_class=dataset.BatchGenerator,
+    )
     method.base_model_train_scope = train_scope
     method.base_model_block_info = block_info
     method.base_model_pred_with_transformer_tokens = list(tokens)
