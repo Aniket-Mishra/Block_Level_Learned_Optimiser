@@ -3,11 +3,11 @@ from collections import namedtuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim.lr_scheduler as lr_scheduler
 from scipy import stats
 from torch.func import functional_call
 
+from block_level_learned_optimization.task_encoder import LambdaLayer as LambdaLayer
 from block_level_learned_optimization.optimizer_setup import (
     make_transformer_optimizer as make_transformer_optimizer,
     set_optimizer as set_optimizer,
@@ -29,15 +29,6 @@ def set_device():
     if torch.cuda.is_available():
         return torch.device("cuda"), list(range(torch.cuda.device_count()))
     return torch.device("cpu"), []
-
-
-class LambdaLayer(nn.Module):
-    def __init__(self, lambd):
-        super().__init__()
-        self.lambd = lambd
-
-    def forward(self, x):
-        return self.lambd(x)
 
 
 def func_call(model, params_dict=None, args=(), kwargs=None):
