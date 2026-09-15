@@ -429,6 +429,9 @@ ANCHOR_FLAGS = {
 
 VARIANTS = {
     "anchor": {},
+    "no_layer_embedding": {"use_layer_id": False},
+    "no_block_position": {"use_block_pos_embedding": False},
+    "no_sequence_position": {"use_pos_encoder": False},
     "no_block_statistics": {
         "use_weight_stats": False,
         "use_block_signature": False,
