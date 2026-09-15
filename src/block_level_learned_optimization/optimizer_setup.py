@@ -2,7 +2,7 @@
 
 import torch
 
-from .parameter_scope import _matches_filters
+from .parameter_scope import DEFAULT_MIN_INIT_STD, _matches_filters
 
 
 def set_optimizer(
@@ -14,8 +14,8 @@ def set_optimizer(
 ):
     """Returns (model_optimizer, transformer_optimizer).
 
-    Parameters matching include_tokens are transformer-managed and excluded
-    from the base Adam optimizer. include_tokens=None falls back to
+    Parameters matching include_tokens are excluded from Adam unless their
+    initial std is below min_init_std. include_tokens=None falls back to
     model.pred_with_transformer. Returns (None, transformer_optimizer) when
     no base parameters remain for Adam.
     """
@@ -26,14 +26,16 @@ def set_optimizer(
     exclude_tokens = list(exclude_tokens)
 
     has_include = bool(include_tokens)
-    base_params = [
-        p
-        for name, p in model.named_parameters()
-        if not (
-            has_include
-            and _matches_filters(name, include_tokens, exclude_tokens)
+    min_init_std = config_params.get("min_init_std", DEFAULT_MIN_INIT_STD)
+    base_params = []
+    for name, parameter in model.named_parameters():
+        is_transformer_managed = has_include and _matches_filters(
+            name, include_tokens, exclude_tokens
         )
-    ]
+        if is_transformer_managed and parameter.data.std().item() < min_init_std:
+            is_transformer_managed = False
+        if not is_transformer_managed:
+            base_params.append(parameter)
 
     model_optimizer = None
     if base_params:
