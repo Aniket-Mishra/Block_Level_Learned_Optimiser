@@ -8,7 +8,24 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import utils
+
+from block_level_learned_optimization.optimizer_setup import (
+    make_transformer_optimizer,
+    set_optimizer,
+)
+from block_level_learned_optimization.parameter_scope import (
+    DEFAULT_MIN_INIT_STD,
+    _name_matches_any_token,
+)
+from block_level_learned_optimization.training_utils import (
+    CoherenceController,
+    CustomLRScheduler,
+    accuracy,
+    func_call,
+    l2_regularization,
+    select_top_k,
+    zeroed_gradients,
+)
 
 _METRICS_STEPS_FIELDS = (
     "task_id",
@@ -156,7 +173,7 @@ class PROPOSED:
         self._test_steps = self.config_params["test_steps"]
         self._device = self.config_params["device"]
 
-        self.model_optimizer, self.transformer_optimizer = utils.set_optimizer(
+        self.model_optimizer, self.transformer_optimizer = set_optimizer(
             self.model, self.transformer_model, config_params
         )
         self._outer_opt_name = str(
@@ -171,7 +188,7 @@ class PROPOSED:
         token_matched_names = {
             name
             for name, _ in self.model.named_parameters()
-            if utils._name_matches_any_token(
+            if _name_matches_any_token(
                 name, self.model.pred_with_transformer
             )
         }
@@ -179,7 +196,7 @@ class PROPOSED:
         self._weight_clamp = {}
         managed_names = []
         min_init_std = config_params.get(
-            "min_init_std", utils.DEFAULT_MIN_INIT_STD
+            "min_init_std", DEFAULT_MIN_INIT_STD
         )
         for name, param in self.model.named_parameters():
             if name not in token_matched_names:
@@ -285,7 +302,7 @@ class PROPOSED:
         else:
             model_params = dict(model.named_parameters())
         model_params.update(theta["model"])
-        pred = utils.func_call(model, model_params, batch.x_sp)
+        pred = func_call(model, model_params, batch.x_sp)
 
         if self._ema_objective == "ce":
             objective = self.criterion(pred, batch.y_sp)
@@ -353,9 +370,9 @@ class PROPOSED:
             model_params = dict(model.named_parameters())
         model_params.update(theta["model"])
 
-        utils.zeroed_gradients(model)
+        zeroed_gradients(model)
 
-        pred = utils.func_call(model, model_params, batch.x_sp)
+        pred = func_call(model, model_params, batch.x_sp)
 
         loss = self.criterion(pred, batch.y_sp)
         loss.backward()
@@ -365,7 +382,7 @@ class PROPOSED:
         )
 
         if self._top_k != 1.0 and self.task > 0:
-            weights_info["score"] = utils.select_top_k(
+            weights_info["score"] = select_top_k(
                 weights_info["score"], self._top_k
             )
 
@@ -434,7 +451,7 @@ class PROPOSED:
         else:
             prev_scores = self.previous_tsk_score if self.task > 0 else None
 
-        output_task, weight_updates = utils.func_call(
+        output_task, weight_updates = func_call(
             transformer_model,
             transformer_params,
             args=(batch.x_sp, weights_info["data"], weights_info["score"]),
@@ -466,13 +483,13 @@ class PROPOSED:
                 device,
             )
         )
-        predictions = utils.func_call(
+        predictions = func_call(
             self.model, updated_model_params, batch.x_sp
         )
         inner_loss = self.criterion(predictions, batch.y_sp)
         # dummy_loss exists only to attach gradients to the transformer.
         dummy_loss = self._mse_loss(output_task.squeeze(), task_id)
-        l2reg = utils.l2_regularization(updated_model_params)
+        l2reg = l2_regularization(updated_model_params)
         inner_loss = inner_loss + 1e-3 * dummy_loss + self._lambda_l2 * l2reg
 
         all_params_dict = {
@@ -680,11 +697,11 @@ class PROPOSED:
         use_prodigy = self._outer_opt_name == "prodigy"
         if use_prodigy and self.task > 0:
             # this is not used, I got bored of the paper, we skip.
-            self.transformer_optimizer = utils.make_transformer_optimizer(
+            self.transformer_optimizer = make_transformer_optimizer(
                 self.transformer_model, self.config_params
             )
 
-        transformer_scheduler = utils.CustomLRScheduler(
+        transformer_scheduler = CustomLRScheduler(
             self.transformer_optimizer,
             self.config_params,
             self.task,
@@ -720,7 +737,7 @@ class PROPOSED:
         buffered_per_tensor_rows = []
 
         # Stationarity-driven anneal-then-stop
-        controller = utils.CoherenceController(
+        controller = CoherenceController(
             window=int(self.config_params.get("controller_window", 500)),
             q=int(self.config_params.get("controller_q", 4)),
             max_decays=int(self.config_params.get("controller_max_decays", 3)),
@@ -760,13 +777,13 @@ class PROPOSED:
                 self.get_updated_params(new_theta, batch, c)
             )
             updated_model_params.update(new_theta["model"])
-            predictions = utils.func_call(
+            predictions = func_call(
                 self.model, updated_model_params, batch.x_qr
             )
 
             inner_loss = self.criterion(predictions, batch.y_qr)
             dummy_loss = self._mse_loss(output_task.squeeze(), task_id_tensor)
-            l2reg = utils.l2_regularization(updated_model_params)
+            l2reg = l2_regularization(updated_model_params)
             loss = inner_loss + 1e-3 * dummy_loss + self._lambda_l2 * l2reg
             _sync()
             timer_accum["outer_fwd"] += time.perf_counter() - t0
@@ -979,9 +996,9 @@ class PROPOSED:
         test_accuracy = []
         for step in range(self._test_steps):
             optimizer.zero_grad()
-            predictions = utils.func_call(eval_model, None, batch.x_qr)
+            predictions = func_call(eval_model, None, batch.x_qr)
             loss = self.criterion(predictions, batch.y_qr)
-            acc = utils.accuracy(predictions, batch.y_qr)
+            acc = accuracy(predictions, batch.y_qr)
             test_accuracy.append(acc)
             test_loss.append(loss.item())
 
@@ -995,12 +1012,12 @@ class PROPOSED:
                     device=device,
                 )
             )
-            predictions = utils.func_call(
+            predictions = func_call(
                 eval_model, updated_model_params, batch.x_sp
             )
             inner_loss = self.criterion(predictions, batch.y_sp)
             dummy_loss = self._mse_loss(output_task.squeeze(), task_idx)
-            l2reg = utils.l2_regularization(updated_model_params)
+            l2reg = l2_regularization(updated_model_params)
             loss = inner_loss + 1e-3 * dummy_loss + self._lambda_l2 * l2reg
             loss.backward()
             optimizer.step()
