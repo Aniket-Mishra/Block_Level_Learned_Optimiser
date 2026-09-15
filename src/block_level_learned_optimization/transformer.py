@@ -33,6 +33,9 @@ class TransformerModel(nn.Module):
         self.importance_eps = float(config_params.get("importance_eps", 1e-3))
 
         self.use_layer_id = bool(config_params.get("use_layer_id", True))
+        self.use_block_pos_embedding = bool(
+            config_params.get("use_block_pos_embedding", self.use_layer_id)
+        )
         self.use_weight_stats = bool(
             config_params.get("use_weight_stats", True)
         )
@@ -51,7 +54,6 @@ class TransformerModel(nn.Module):
             config_params.get("use_signed_gradient_basis", False)
         )
 
-        # With use_layer_id=True the model already gets layer and block-pos embeddings
         self.use_pos_encoder = bool(
             config_params.get("use_pos_encoder", False)
         )
@@ -135,6 +137,7 @@ class TransformerModel(nn.Module):
             self.layer_embedding = nn.Embedding(
                 n_model_layers + 1, self.d_model
             ).to(self.device)
+        if self.use_block_pos_embedding:
             self.block_pos_embedding = nn.Embedding(
                 max_blocks_per_layer + 1, self.d_model
             ).to(self.device)
@@ -712,11 +715,9 @@ class TransformerModel(nn.Module):
         )
 
         if self.use_layer_id:
-            block_tokens = (
-                block_tokens
-                + self.layer_embedding(layer_ids)
-                + self.block_pos_embedding(block_pos_ids)
-            )
+            block_tokens = block_tokens + self.layer_embedding(layer_ids)
+        if self.use_block_pos_embedding:
+            block_tokens = block_tokens + self.block_pos_embedding(block_pos_ids)
 
         src = torch.cat([task_encoding, block_tokens], dim=0)
         if self.use_pos_encoder:
