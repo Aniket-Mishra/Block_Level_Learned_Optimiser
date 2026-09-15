@@ -332,11 +332,12 @@ def proposed_primary_jobs(
     datasets,
     training_layers_variants=None,
     plasticity_scales_list=None,
+    flag_overrides=None,
 ):
     """Primary proposed-method sweep.
 
-    Feature flags come from feature_flags_for(dataset); this builder only
-    sets the block strategy and plasticity scales.
+    Feature flags default to feature_flags_for(dataset); explicit overrides
+    take precedence over dataset and block settings.
     """
     jobs = []
     if training_layers_variants is None:
@@ -360,6 +361,7 @@ def proposed_primary_jobs(
                                 "alpha": None,
                                 "beta": None,
                                 **block_config,
+                                **(flag_overrides or {}),
                             },
                             training_layers=training_layers,
                         )

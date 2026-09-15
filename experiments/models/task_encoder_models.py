@@ -5,6 +5,10 @@ import torchvision.models as models
 
 import utils
 
+from block_level_learned_optimization.task_encoder import (
+    TaskEncoderGeneric as TaskEncoderGeneric,
+)
+
 
 def cnn_block(in_dim, features_dim, kernel_size=3, padding="same"):
     return nn.Sequential(
@@ -44,7 +48,7 @@ class TaskEncoderMNIST(torch.nn.Module):
                 f"Loading pretrained task encoder from: {pretrained_model_path}"
             )
             pretrained_task_encoder.load_state_dict(
-                torch.load(pretrained_model_path)
+                torch.load(pretrained_model_path, map_location="cpu")
             )
         else:
             print(
@@ -122,33 +126,6 @@ class TaskEncoderPMNIST(torch.nn.Module):
     def forward(self, x):
         x = self.net(x)
         return x
-
-
-class TaskEncoderGeneric(nn.Module):
-    """Architecture-agnostic task encoder.
-
-    Flattens the support inputs and maps them through an MLP to a single task
-    embedding of size config_params['embedding_size'], averaging over the
-    batch. Works for any input shaped [B, ...].
-    """
-
-    def __init__(self, config_params):
-        super().__init__()
-        self.config_params = config_params
-        emb_dim = config_params["embedding_size"]
-
-        self.net = nn.Sequential(
-            nn.Flatten(),
-            nn.LazyLinear(128),
-            nn.ReLU(),
-            utils.LambdaLayer(lambda x: torch.mean(x, dim=0)),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, emb_dim),
-        )
-
-    def forward(self, x):
-        return self.net(x)
 
 
 class TaskEncoderResNet(nn.Module):

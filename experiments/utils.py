@@ -1,49 +1,41 @@
 import json
-import math
 from collections import namedtuple
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim.lr_scheduler as lr_scheduler
 from scipy import stats
-from torch.func import functional_call
+
+from block_level_learned_optimization.task_encoder import LambdaLayer as LambdaLayer
+from block_level_learned_optimization.optimizer_setup import (
+    make_transformer_optimizer as make_transformer_optimizer,
+    set_optimizer as set_optimizer,
+)
+from block_level_learned_optimization.parameter_scope import (
+    DEFAULT_MIN_INIT_STD as DEFAULT_MIN_INIT_STD,
+    _is_leaf_module as _is_leaf_module,
+    _matches_filters as _matches_filters,
+    _name_matches_any_token as _name_matches_any_token,
+    _segments_contain as _segments_contain,
+    calculate_transformer_blocks as calculate_transformer_blocks,
+    summarize_train_scope as summarize_train_scope,
+)
+from block_level_learned_optimization.training_utils import (
+    CoherenceController as CoherenceController,
+    CustomLRScheduler as CustomLRScheduler,
+    accuracy as accuracy,
+    func_call as func_call,
+    l2_regularization as l2_regularization,
+    select_top_k as select_top_k,
+    zeroed_gradients as zeroed_gradients,
+)
 
 Batch = namedtuple("Batch", ["x_sp", "y_sp", "x_qr", "y_qr"])
-
-DEFAULT_MIN_INIT_STD = 1e-6
 
 
 def set_device():
     if torch.cuda.is_available():
         return torch.device("cuda"), list(range(torch.cuda.device_count()))
     return torch.device("cpu"), []
-
-
-class LambdaLayer(nn.Module):
-    def __init__(self, lambd):
-        super().__init__()
-        self.lambd = lambd
-
-    def forward(self, x):
-        return self.lambd(x)
-
-
-def func_call(model, params_dict=None, args=(), kwargs=None):
-    """Calls a module, with torch.func.functional_call when params are overridden.
-
-    params_dict=None calls the module directly, skipping the cost of
-    rebuilding dict(model.named_parameters()) on every forward.
-    """
-    if kwargs is None:
-        kwargs = {}
-
-    if params_dict is None:
-        if isinstance(args, tuple):
-            return model(*args, **kwargs)
-        return model(args, **kwargs)
-
-    return functional_call(model, params_dict, args, kwargs)
 
 
 def save_object(obj, name):
@@ -64,405 +56,14 @@ def load_object(name):
         return json.load(f)
 
 
-def zeroed_gradients(model):
-    for p in model.parameters():
-        if p.grad is not None:
-            p.grad.detach_()
-            p.grad.zero_()
-
-
 def define_task_labels(labels, num_classes):
     return [
         labels[i : i + num_classes] for i in range(0, len(labels), num_classes)
     ]
 
 
-def _segments_contain(parts, token_parts):
-    span = len(token_parts)
-    for start in range(len(parts) - span + 1):
-        if parts[start : start + span] == token_parts:
-            return True
-    return False
-
-
-def _name_matches_any_token(name, tokens):
-    parts = name.split(".")
-    for token in tokens:
-        if "." in token:
-            # Match the token as a run of dotted segments anywhere in the
-            # name, so a wrapped backbone (e.g. L2P/DyTox "backbone." prefix)
-            # is matched by the same unwrapped token used for the bare ViT.
-            if _segments_contain(parts, token.split(".")):
-                return True
-        elif token in parts:
-            return True
-    return False
-
-
-def _is_leaf_module(module):
-    children = module.children()
-    try:
-        next(children)
-        return False
-    except StopIteration:
-        return True
-
-
-def _matches_filters(name, include_tokens, exclude_tokens):
-    if include_tokens and not _name_matches_any_token(name, include_tokens):
-        return False
-    if exclude_tokens and _name_matches_any_token(name, exclude_tokens):
-        return False
-    return True
-
-
-def summarize_train_scope(
-    model, *, include_tokens=(), exclude_tokens=(), min_init_std=0.0
-):
-    """Summarizes the parameters the transformer meta-optimizer will manage.
-
-    include_tokens / exclude_tokens filter parameters by dot-split name.
-    min_init_std drops tensors whose init-time std is below the floor, so the
-    scope matches the set the meta-optimizer actually updates and the
-    transformer output length equals the number of updated weights.
-    """
-    include_tokens = list(include_tokens)
-    exclude_tokens = list(exclude_tokens)
-
-    named_params = list(model.named_parameters())
-
-    selected = []
-    filter_matched_param_ids = set()
-    for name, p in named_params:
-        matches = _matches_filters(name, include_tokens, exclude_tokens)
-        if matches:
-            filter_matched_param_ids.add(id(p))
-        # "not (std < floor)" keeps NaN-std tensors, matching PROPOSED.__init__.
-        if matches and not (p.data.std().item() < min_init_std):
-            selected.append((name, p))
-
-    selected_tensor_numels = []
-    selected_tensor_d0 = []
-    selected_param_names = []
-    trainable_info = []
-    selected_total_params = 0
-    trainable_params = 0
-
-    for name, p in selected:
-        numel = int(p.numel())
-        d0 = int(p.shape[0]) if p.ndim > 0 else 0
-        selected_tensor_numels.append(numel)
-        selected_tensor_d0.append(d0)
-        selected_param_names.append(name)
-        selected_total_params += numel
-        if p.requires_grad:
-            trainable_info.append({"name": name, "numel": numel, "d0": d0})
-            trainable_params += numel
-
-    trainable_param_names = [t["name"] for t in trainable_info]
-
-    # A leaf qualifies when it owns at least one trainable direct parameter
-    # and at least one direct parameter matching the filters; these need not
-    # be the same tensor.
-    trainable_leaf_module_names = []
-    for module_name, module in model.named_modules():
-        if not _is_leaf_module(module):
-            continue
-        direct_params = list(module.parameters(recurse=False))
-        if not direct_params:
-            continue
-        if not any(p.requires_grad for p in direct_params):
-            continue
-        if any(id(p) in filter_matched_param_ids for p in direct_params):
-            trainable_leaf_module_names.append(module_name)
-
-    if not trainable_leaf_module_names:
-        scope_label = "none"
-    elif len(trainable_leaf_module_names) == 1:
-        scope_label = "single_layer"
-    else:
-        scope_label = "multi_layer"
-
-    return {
-        "selected_total_parameters": int(selected_total_params),
-        "selected_parameter_tensors": int(len(selected)),
-        "selected_tensor_numels": selected_tensor_numels,
-        "selected_tensor_d0": selected_tensor_d0,
-        "selected_param_names": selected_param_names,
-        "trainable_layer_stats": trainable_info,
-        "trainable_parameters": int(trainable_params),
-        "trainable_parameter_tensors": int(len(trainable_info)),
-        "trainable_param_names": trainable_param_names,
-        "include_tokens": include_tokens,
-        "exclude_tokens": exclude_tokens,
-        "trainable_leaf_module_count": int(len(trainable_leaf_module_names)),
-        "trainable_leaf_module_names": trainable_leaf_module_names,
-        "training_scope_label": scope_label,
-        "last_trainable_module": trainable_leaf_module_names[-1]
-        if trainable_leaf_module_names
-        else None,
-    }
-
-
-def calculate_transformer_blocks(scope_summary, config):
-    """Computes block partitioning stats, mirroring TransformerModel exactly."""
-    strategy = config.get("block_strategy", "row_wise")
-    layers = scope_summary["trainable_layer_stats"]
-
-    blocks_per_param = {}
-    max_blocks = 0
-    total_blocks = 0
-
-    if strategy == "flatten":
-        alpha = float(config["alpha"])
-        beta = float(config["beta"])
-        for layer in layers:
-            name = layer["name"]
-            numel = layer["numel"]
-            if numel == 0:
-                continue
-            block_size = max(1, int(numel**alpha / beta))
-            n_blocks = int(math.ceil(numel / block_size))
-            blocks_per_param[name] = n_blocks
-            total_blocks += n_blocks
-            if n_blocks > max_blocks:
-                max_blocks = n_blocks
-    else:
-        block_rows = int(config.get("block_rows", 4))
-        row_scale = float(config.get("row_scale", 1.0))
-        for layer in layers:
-            name = layer["name"]
-            numel = layer["numel"]
-            d0 = layer["d0"]
-            if numel == 0:
-                continue
-            d0_eff = max(1, int(d0 * row_scale))
-            row_len = max(1, numel // d0_eff)
-            d0_eff = numel // row_len
-            n_blocks = int(math.ceil(d0_eff / block_rows))
-            blocks_per_param[name] = n_blocks
-            total_blocks += n_blocks
-            if n_blocks > max_blocks:
-                max_blocks = n_blocks
-
-    return {
-        "total_blocks": total_blocks,
-        "max_blocks_in_any_tensor": max_blocks,
-        "blocks_per_parameter_tensor": blocks_per_param,
-    }
-
-
-def set_optimizer(
-    model,
-    transformer_model,
-    config_params,
-    include_tokens=None,
-    exclude_tokens=(),
-):
-    """Returns (model_optimizer, transformer_optimizer).
-
-    Parameters matching include_tokens are transformer-managed and excluded
-    from the base Adam optimizer. include_tokens=None falls back to
-    model.pred_with_transformer. Returns (None, transformer_optimizer) when
-    no base parameters remain for Adam.
-    """
-    if include_tokens is None:
-        include_tokens = list(getattr(model, "pred_with_transformer", []))
-    else:
-        include_tokens = list(include_tokens)
-    exclude_tokens = list(exclude_tokens)
-
-    has_include = bool(include_tokens)
-    base_params = [
-        p
-        for name, p in model.named_parameters()
-        if not (
-            has_include
-            and _matches_filters(name, include_tokens, exclude_tokens)
-        )
-    ]
-
-    model_optimizer = None
-    if base_params:
-        model_optimizer = torch.optim.Adam(
-            base_params,
-            lr=config_params["lr"],
-            weight_decay=config_params["lambda_l2"],
-        )
-    transformer_optimizer = make_transformer_optimizer(
-        transformer_model, config_params
-    )
-    return model_optimizer, transformer_optimizer
-
-
-def make_transformer_optimizer(transformer_model, config_params):
-    """Builds the outer (meta) optimizer: "adam" (default) or the
-    learning-rate-free "prodigy" ablation (Mishchenko & Defazio, 2024)."""
-    name = str(config_params.get("outer_optimizer", "adam")).lower()
-    lambda_l2 = config_params["lambda_l2"]
-    if name == "adam":
-        return torch.optim.Adam(
-            transformer_model.parameters(),
-            lr=config_params.get("lr_transformer", config_params["lr"]),
-            weight_decay=lambda_l2,
-        )
-    if name == "prodigy":
-        try:
-            from prodigyopt import Prodigy
-        except ImportError as e:
-            raise ImportError(
-                "outer_optimizer='prodigy' requires `pip install prodigyopt`"
-            ) from e
-        return Prodigy(
-            transformer_model.parameters(),
-            lr=1.0,
-            weight_decay=lambda_l2,
-        )
-    raise ValueError(f"Unknown outer_optimizer: {name!r}")
-
-
-def l2_regularization(dict_parameters):
-    # Per-tensor L2 norms, not sum-of-squares: squared L2 produces NaN
-    # gradients for zero-initialised tensors.
-    return sum(torch.norm(p, p=2) for p in dict_parameters.values())
-
-
-def select_top_k(importance_scores, K):
-    """Keeps the top-K fraction of scores globally and zeros the rest."""
-    flat = torch.cat([s.view(-1) for s in importance_scores.values()])
-    if flat.numel() == 0:
-        return importance_scores.copy()
-    threshold = torch.quantile(flat, 1 - K)
-    return {
-        name: s * (s >= threshold) for name, s in importance_scores.items()
-    }
-
-
-class CustomLRScheduler(lr_scheduler._LRScheduler):
-    """Warmup-then-constant outer LR with event-driven decay.
-
-    Decay is triggered by the CoherenceController via decay(). With
-    outer_optimizer="prodigy" pass lr_init=1.0 and use_warmup=False so the
-    scheduler only applies the decay multiplier.
-    """
-
-    def __init__(
-        self, optimizer, config_params, task_id, lr_init=None, use_warmup=True
-    ):
-        self.warmup_steps = config_params["warmup_steps"] if use_warmup else 0
-        self.lr_init = (
-            lr_init
-            if lr_init is not None
-            else config_params.get("lr_transformer", config_params["lr"])
-        )
-        self.task_id = task_id
-        self.decay_factor = 1.0
-        super().__init__(optimizer)
-
-    def get_lr(self):
-        if (
-            self.task_id == 0
-            and self.warmup_steps > 0
-            and self.last_epoch < self.warmup_steps
-        ):
-            lr = self.lr_init * (self.last_epoch / self.warmup_steps)
-        else:
-            lr = self.lr_init
-        return [lr * self.decay_factor] * len(self.optimizer.param_groups)
-
-    def decay(self, factor=0.5):
-        self.decay_factor *= factor
-        for group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-            group["lr"] = lr
-
-
-class CoherenceController:
-    """Stationarity-driven anneal-then-stop controller for the outer loop.
-
-    A diagnostic block is q sign tests, each the inner product of the mean
-    meta-gradients of two consecutive `seg`-step sub-windows (Pflug 1990;
-    SplitSGD, Sordello & Su 2019). A strict majority of negative signs
-    (2*neg > q) declares stationarity: each of the first `max_decays`
-    detections halves the outer LR, the next one stops the task. The first
-    block of each task is burn-in, since the task-boundary transient mimics
-    stationarity. Signs and counts only, so nothing is scale-, architecture-
-    or step-budget-dependent.
-    """
-
-    DECAY = "decay"
-    STOP = "stop"
-
-    def __init__(self, window, q=4, max_decays=3, burn_in=None):
-        self.seg = max(1, int(window) // 2)
-        self.q = int(q)
-        self.max_decays = int(max_decays)
-        self.n_decays = 0
-        self.burn_in_left = (
-            int(burn_in) if burn_in is not None else self.block_len
-        )
-        self._signs = []
-        self._step_in_pair = 0
-        self._sum_first = None
-        self._sum_second = None
-        self.last_coherence = None
-        self.last_neg_votes = None
-        self.steps_seen = 0
-
-    @property
-    def block_len(self):
-        return self.q * 2 * self.seg
-
-    def _reset_pair(self):
-        self._step_in_pair = 0
-        self._sum_first = None
-        self._sum_second = None
-
-    def update(self, grad_vec):
-        """Feeds one flattened meta-gradient; returns None, DECAY, or STOP."""
-        self.steps_seen += 1
-        if self.burn_in_left > 0:
-            self.burn_in_left -= 1
-            return None
-
-        g = grad_vec.detach()
-        if self._step_in_pair < self.seg:
-            self._sum_first = (
-                g.clone() if self._sum_first is None else self._sum_first + g
-            )
-        else:
-            self._sum_second = (
-                g.clone() if self._sum_second is None else self._sum_second + g
-            )
-        self._step_in_pair += 1
-        if self._step_in_pair < 2 * self.seg:
-            return None
-
-        coherence = torch.dot(
-            self._sum_first / self.seg, self._sum_second / self.seg
-        ).item()
-        self.last_coherence = coherence
-        self._signs.append(coherence < 0)
-        self._reset_pair()
-        if len(self._signs) < self.q:
-            return None
-
-        neg_votes = sum(self._signs)
-        self._signs = []
-        self.last_neg_votes = neg_votes
-        if 2 * neg_votes <= self.q:
-            return None
-        if self.n_decays < self.max_decays:
-            self.n_decays += 1
-            return self.DECAY
-        return self.STOP
-
-
 # Continual-learning metrics. Accuracy matrices are dicts keyed by training
 # time T mapping to {task_id: accuracy}, written R_{T, i} below.
-
-
-def accuracy(pred, y_true):
-    return (pred.argmax(1) == y_true).float().mean().item()
 
 
 def infer_n_tasks_from_previous(previous_tasks_acc):
