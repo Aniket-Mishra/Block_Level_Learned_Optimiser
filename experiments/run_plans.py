@@ -210,21 +210,21 @@ PLANS = {
                 ALL_BUT_HEAD,
                 "all_but_head",
                 variants=("anchor",),
-                flag_overrides={"use_tensor_embedding": False},
+                flag_overrides={"use_tensor_embedding": False, "use_ema": False},
             ),
             ProposedRun(
                 "rotatedmnist",
                 ALL_BUT_HEAD,
                 "all_but_head",
                 variants=("anchor",),
-                flag_overrides={"use_tensor_embedding": False},
+                flag_overrides={"use_tensor_embedding": False, "use_ema": False},
             ),
             ProposedRun(
                 "cifar100",
                 CONV3,
                 "conv3",
                 variants=("anchor",),
-                flag_overrides={"use_tensor_embedding": False},
+                flag_overrides={"use_tensor_embedding": False, "use_ema": False},
             ),
         ],
         "baselines": [],
@@ -390,7 +390,7 @@ PLANS = {
                 "all_but_head",
                 variants=(
                     "anchor",
-                    "ema_mas",
+                    "no_ema",
                     "no_block_statistics",
                     "no_layer_id",
                     "no_tensor_embedding",
@@ -404,7 +404,7 @@ PLANS = {
                 "all_but_head",
                 variants=(
                     "anchor",
-                    "ema_mas",
+                    "no_ema",
                     "no_block_statistics",
                     "no_layer_id",
                     "no_tensor_embedding",
@@ -418,7 +418,7 @@ PLANS = {
                 "all_but_head",
                 variants=(
                     "anchor",
-                    "ema_mas",
+                    "no_ema",
                     "no_block_statistics",
                     "no_layer_id",
                     "no_tensor_embedding",
@@ -432,7 +432,7 @@ PLANS = {
                 "all_but_head",
                 variants=(
                     "anchor",
-                    "ema_mas",
+                    "no_ema",
                     "no_block_statistics",
                     "no_layer_id",
                     "no_tensor_embedding",
@@ -524,6 +524,7 @@ PLANS = {
                 variants=("anchor",),
                 flag_overrides={
                     "use_layer_id": False,
+                    "use_block_pos_embedding": False,
                     "use_tensor_embedding": False,
                     "use_pos_encoder": False,
                     "use_ema": True,
@@ -539,6 +540,7 @@ PLANS = {
                 variants=("anchor",),
                 flag_overrides={
                     "use_layer_id": False,
+                    "use_block_pos_embedding": False,
                     "use_tensor_embedding": False,
                     "use_pos_encoder": False,
                     "use_ema": True,
@@ -568,6 +570,7 @@ PLANS = {
                 variants=("anchor",),
                 flag_overrides={
                     "use_layer_id": False,
+                    "use_block_pos_embedding": False,
                     "use_tensor_embedding": False,
                     "use_pos_encoder": False,
                     "use_ema": True,

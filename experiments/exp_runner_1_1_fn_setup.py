@@ -37,6 +37,7 @@ _RESULT_ROW_KEYS = (
     "beta",
     "plasticity_scales",
     "use_layer_id",
+    "use_block_pos_embedding",
     "use_weight_stats",
     "use_stability",
     "use_block_signature",
@@ -80,8 +81,18 @@ def _experiment_label(config):
     ps = config.get("plasticity_scales")
     parts.append(f"ps{len(ps)}" if ps is not None else "ps0")
     parts.append("lid" if config.get("use_layer_id") else "nolid")
+    use_layer_id = bool(config.get("use_layer_id", True))
+    use_block_pos_embedding = bool(
+        config.get("use_block_pos_embedding", use_layer_id)
+    )
+    if use_block_pos_embedding != use_layer_id:
+        parts.append("bpos" if use_block_pos_embedding else "nobpos")
     parts.append("ws" if config.get("use_weight_stats") else "nows")
     parts.append("stab" if config.get("use_stability") else "nostab")
+    if config.get("use_pos_encoder"):
+        parts.append("pos")
+    if config.get("use_ema"):
+        parts.append(f"ema-{config.get('ema_objective', 'mas')}")
     variant = config.get("ablation_variant")
     if variant:
         parts.append(variant)

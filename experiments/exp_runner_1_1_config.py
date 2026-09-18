@@ -419,24 +419,38 @@ def proposed_ablation_jobs(
     return jobs
 
 
-ANCHOR_FLAGS = dict(FEATURE_FLAGS_DEFAULT)
+ANCHOR_FLAGS = {
+    **FEATURE_FLAGS_DEFAULT,
+    "use_block_pos_embedding": True,
+    "use_pos_encoder": True,
+    "use_ema": True,
+}
 
 
 VARIANTS = {
     "anchor": {},
+    "no_layer_embedding": {"use_layer_id": False},
+    "no_block_position": {"use_block_pos_embedding": False},
+    "no_sequence_position": {"use_pos_encoder": False},
     "no_block_statistics": {
         "use_weight_stats": False,
         "use_block_signature": False,
     },
-    "no_layer_id": {"use_layer_id": False},
+    "no_layer_id": {
+        "use_layer_id": False,
+        "use_block_pos_embedding": False,
+    },
     "no_tensor_embedding": {"use_tensor_embedding": False},
     "no_weight_stats": {"use_weight_stats": False},
     "no_block_signature": {"use_block_signature": False},
     "no_identity": {
         "use_layer_id": False,
+        "use_block_pos_embedding": False,
         "use_tensor_embedding": False,
         "use_block_signature": False,
+        "use_pos_encoder": False,
     },
+    "no_ema": {"use_ema": False},
     "ema_mas": {"use_ema": True, "ema_objective": "mas"},
     "ema_ce": {"use_ema": True, "ema_objective": "ce"},
 }
@@ -447,13 +461,6 @@ def variant_rows(*names):
     return [(name, VARIANTS[name]) for name in names]
 
 
-# Named arms, all derived from VARIANTS:
-#   ABLATION_VARIANTS : leave-one-out for the standard matrix. Block statistics
-#                       (weight_stats + block_signature) appear as one row.
-#   GROUPED_VARIANTS  : bundled arm for big models (ResNet / ViT).
-#   EMA_AXIS          : anchor is EMA off, so only the two EMA-on rows are added;
-#                       no_ema is listed but filtered out by ablation_jobs as it
-#                       would duplicate the anchor.
 ABLATION_VARIANTS = variant_rows(
     "anchor",
     "no_block_statistics",
@@ -461,7 +468,7 @@ ABLATION_VARIANTS = variant_rows(
     "no_tensor_embedding",
 )
 GROUPED_VARIANTS = variant_rows("anchor", "no_block_statistics", "no_identity")
-EMA_AXIS = [("no_ema", {"use_ema": False})] + variant_rows("ema_mas", "ema_ce")
+EMA_AXIS = variant_rows("no_ema", "ema_mas", "ema_ce")
 
 
 def ablation_jobs(
@@ -515,7 +522,10 @@ def ablation_jobs(
             variants += [
                 (name, overrides)
                 for (name, overrides) in EMA_AXIS
-                if name != "no_ema"
+                if any(
+                    anchor_flags.get(flag) != value
+                    for flag, value in overrides.items()
+                )
             ]
 
     variants = [
